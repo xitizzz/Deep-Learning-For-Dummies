@@ -1,5 +1,7 @@
 import numpy as np
 from keras.layers import Dense, Dropout, InputLayer
+from keras.optimizers import Adam, SGD, RMSprop
+from keras.callbacks import EarlyStopping
 from keras.models import Sequential
 from sklearn.base import BaseEstimator
 import keras.backend as K
@@ -9,11 +11,14 @@ from time import time
 def root_mean_squared_error(y_true, y_pred):
     return K.sqrt(K.mean(K.square(y_pred - y_true), axis=-1))
 
+
 class FNNClassifier(BaseEstimator):
-    def __init__(self, hidden_layers=[50], dropout=0, activation='softmax', optimizer='adam', metrics=['accuracy'],
-                 loss='categorical_crossentropy', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=[],
-                 class_weight=None, validation_split=0.0, validation_data=None):
-        self.hidden_layers = hidden_layers
+    def __init__(self, hidden_layers=(50,), dropout=0.5, activation='softmax', optimizer='adam', metrics=('accuracy',),
+                 loss='categorical_crossentropy', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
+                 class_weight=None, validation_split=0.0, validation_data=None, early_stopping=1,
+                 learning_rate='auto'):
+
+        self.hidden_layers = list(hidden_layers)
 
         if isinstance(dropout, list):
             assert len(hidden_layers) == len(dropout)
@@ -21,14 +26,34 @@ class FNNClassifier(BaseEstimator):
         else:
             self.dropout = [dropout] * len(hidden_layers)
         self.activation = activation
+
+        self.learning_rate = learning_rate
+        if learning_rate == 'auto':
+            self.optimizer = optimizer
+        else:
+            if optimizer == 'adam':
+                self.optimizer = Adam(lr=learning_rate)
+            elif optimizer == 'sgd':
+                self.optimizer = SGD(lr=learning_rate)
+            elif optimizer == 'rmsprop':
+                self.optimizer = RMSprop(lr=learning_rate)
+            else:
+                raise ValueError(f"'{optimizer} is not supported with user defined learning rate. "
+                                 f"Use 'adam', 'sgd' or 'rmsprop'")
+
+        self.early_stopping = int(early_stopping)
+
+        if self.early_stopping > 0:
+            callbacks += (EarlyStopping(patience=(self.early_stopping-1)),)
+
         self.optimizer = optimizer
-        self.metrics = metrics
+        self.metrics = list(metrics)
         self.loss = loss
         self.epochs = epochs
         self.batch_size = batch_size
         self.timeit = timeit
         self.verbosity = verbosity
-        self.callbacks = callbacks
+        self.callbacks = list(callbacks)
         self.class_weight = class_weight
         self.validation_split = validation_split
         self.validation_data = validation_data
@@ -76,7 +101,11 @@ class FNNClassifier(BaseEstimator):
         return np.array(self.model.predict(X, batch_size=self.batch_size) > 0.5, dtype=np.uint8)
 
     def predict_proba(self, X):
-        return self.model.predict(X, batch_size=self.batch_size)
+        if self.activation == 'sigmoid':
+            return np.hstack([1 - self.model.predict(X, batch_size=self.batch_size),
+                              self.model.predict(X, batch_size=self.batch_size)])
+        else:
+            return self.model.predict(X, batch_size=self.batch_size)
 
     def score(self, X, y):
         return self.model.evaluate(x=X, y=y)
@@ -88,7 +117,8 @@ class FNNClassifier(BaseEstimator):
 class FNNRegressor(BaseEstimator):
     def __init__(self, hidden_layers=[50], dropout=0, activation='linear', optimizer='adam', metrics=['mse'],
                  loss='mse', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=[],
-                 class_weight=None, validation_split=0.0, validation_data=None):
+                 class_weight=None, validation_split=0.0, validation_data=None, early_stopping=False,
+                 learning_rate='auto'):
         self.hidden_layers = hidden_layers
 
         if isinstance(dropout, list):
@@ -97,7 +127,25 @@ class FNNRegressor(BaseEstimator):
         else:
             self.dropout = [dropout] * len(hidden_layers)
         self.activation = activation
-        self.optimizer = optimizer
+
+        self.learning_rate = learning_rate
+        if learning_rate == 'auto':
+            self.optimizer = optimizer
+        else:
+            if optimizer == 'adam':
+                self.optimizer = Adam(lr=learning_rate)
+            elif optimizer == 'sgd':
+                self.optimizer = SGD(lr=learning_rate)
+            elif optimizer == 'rmsprop':
+                self.optimizer = RMSprop(lr=learning_rate)
+            else:
+                raise ValueError(f"'{optimizer} is not supported with user defined learning rate. "
+                                 f"Use 'adam', 'sgd' or 'rmsprop'")
+        self.early_stopping = int(early_stopping)
+
+        if self.early_stopping > 0:
+            callbacks.append(EarlyStopping(patience=(self.early_stopping-1)))
+
         self.metrics = [root_mean_squared_error if x == 'rmse' else x for x in metrics]
         self.loss = root_mean_squared_error if loss == 'rmse' else loss
         self.epochs = epochs
@@ -135,7 +183,7 @@ class FNNRegressor(BaseEstimator):
             print('Fit complete in {:.2f} seconds'.format(time()-start_time))
 
     def predict(self, X):
-        return np.array(self.model.predict(X, batch_size=self.batch_size) > 0.5, dtype=np.uint8)
+        return np.array(self.model.predict(X, batch_size=self.batch_size), dtype=np.float64)
 
     def score(self, X, y):
         return self.model.evaluate(x=X, y=y)
