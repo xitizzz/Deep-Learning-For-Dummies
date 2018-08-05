@@ -4,6 +4,7 @@ from keras.optimizers import Adam, SGD, RMSprop
 from keras.callbacks import EarlyStopping
 from keras.models import Sequential
 from sklearn.base import BaseEstimator
+from sklearn.preprocessing import LabelBinarizer
 import keras.backend as K
 from time import time
 
@@ -12,10 +13,11 @@ def root_mean_squared_error(y_true, y_pred):
     return K.sqrt(K.mean(K.square(y_pred - y_true), axis=-1))
 
 
+# TODO: Change early stopping when validation is absent
 class FNNClassifier(BaseEstimator):
     def __init__(self, hidden_layers=(50,), dropout=0.5, activation='softmax', optimizer='adam', metrics=('accuracy',),
                  loss='categorical_crossentropy', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
-                 class_weight=None, validation_split=0.0, validation_data=None, early_stopping=1,
+                 class_weight=None, validation_split=0.1, validation_data=None, early_stopping=5,
                  learning_rate='auto'):
 
         self.hidden_layers = list(hidden_layers)
@@ -58,6 +60,7 @@ class FNNClassifier(BaseEstimator):
         self.validation_split = validation_split
         self.validation_data = validation_data
         self.model = Sequential()
+        self.label_binarizer = None
 
     def fit(self, X, y):
         if self.timeit:
@@ -66,13 +69,20 @@ class FNNClassifier(BaseEstimator):
 
         if self.verbosity:
             print('Data size ({:d}, {:d}) -\t Epochs {:d} -\t Batch Size {:d}'.format(X.shape[0], X.shape[1], self.epochs, self.batch_size))
-        try:
+
+        if len(y.shape) == 1 and len(np.unique(y)) > 2:
+            self.label_binarizer = LabelBinarizer()
+            y = self.label_binarizer.fit_transform(y)
+
+        # TODO: Add error cases like multiple labels
+        if len(y.shape) == 2:
             n_classes = y.shape[1]
+            print(n_classes)
             if self.class_weight == 'balanced':
                 weights = list(y.shape[0] / (n_classes * y.sum(axis=0)))
                 self.class_weight = {i: weights[i] for i in range(len(weights))}
                 print('Computed Class Weights', self.class_weight)
-        except IndexError:
+        elif len(y.shape) == 1:
             n_classes = 1
             self.loss = 'binary_crossentropy'
             self.activation = 'sigmoid'
@@ -80,6 +90,8 @@ class FNNClassifier(BaseEstimator):
                 weights = list(y.shape[0] / (2 * np.bincount(y)))
                 self.class_weight = {0: weights[0], 1: weights[1]}
                 print('Computed Class Weights', self.class_weight)
+        else:
+            raise ValueError("Invalid Label")
 
         K.clear_session()
         self.model.add(InputLayer(input_shape=(n_features,), name='Input'))
@@ -108,7 +120,10 @@ class FNNClassifier(BaseEstimator):
             return self.model.predict(X, batch_size=self.batch_size)
 
     def score(self, X, y):
-        return self.model.evaluate(x=X, y=y)
+        if self.label_binarizer is not None:
+            y = self.label_binarizer.fit_transform(y)
+        score = self.model.evaluate(x=X, y=y)
+        return {"accuracy": score[1], "loss": score[0]}
 
     def summary(self):
         return self.model.summary()
