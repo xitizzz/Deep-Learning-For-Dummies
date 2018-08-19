@@ -1,11 +1,12 @@
 import numpy as np
-from keras.layers import Dense, Dropout, InputLayer
-from keras.optimizers import Adam, SGD, RMSprop
-from keras.callbacks import EarlyStopping
-from keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, InputLayer
+from tensorflow.keras.optimizers import Adam, SGD, RMSprop
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.regularizers import l1_l2
 from sklearn.base import BaseEstimator
 from sklearn.preprocessing import LabelBinarizer
-import keras.backend as K
+import tensorflow.keras.backend as K
 from time import time
 
 
@@ -18,7 +19,7 @@ class FNNModel(BaseEstimator):
     def __init__(self, hidden_layers, dropout, activation, optimizer, metrics,
                  loss, epochs, batch_size, timeit, verbosity, callbacks,
                  class_weight, validation_split, validation_data, early_stopping,
-                 learning_rate):
+                 learning_rate, l1_penalty, l2_penalty, gradient_clipping_norm, gradient_clipping_value):
 
         self.hidden_layers = list(hidden_layers)
 
@@ -30,18 +31,24 @@ class FNNModel(BaseEstimator):
         self.activation = activation
 
         self.learning_rate = learning_rate
-        if learning_rate == 'auto':
+        if learning_rate == 'auto' and gradient_clipping_norm is None and gradient_clipping_value is None:
             self.optimizer = optimizer
         else:
             if optimizer == 'adam':
-                self.optimizer = Adam(lr=learning_rate)
+                self.optimizer = Adam(lr=Adam().get_config()['lr'] if learning_rate == 'auto' else learning_rate,
+                                      clipnorm=gradient_clipping_norm,
+                                      clipvalue=gradient_clipping_value)
             elif optimizer == 'sgd':
-                self.optimizer = SGD(lr=learning_rate)
+                self.optimizer = SGD(lr=SGD().get_config()['lr'] if learning_rate == 'auto' else learning_rate,
+                                     clipnorm=gradient_clipping_norm,
+                                     clipvalue=gradient_clipping_value)
             elif optimizer == 'rmsprop':
-                self.optimizer = RMSprop(lr=learning_rate)
+                self.optimizer = RMSprop(lr=RMSprop().get_config()['lr'] if learning_rate == 'auto' else learning_rate,
+                                         clipnorm=gradient_clipping_norm,
+                                         clipvalue=gradient_clipping_value)
             else:
-                raise ValueError(f"'{optimizer} is not supported with user defined learning rate. "
-                                 f"Use 'adam', 'sgd' or 'rmsprop'")
+                raise ValueError(f"'{optimizer} is not supported with user defined learning rate and/or gradient clipping. "
+                                 f"Use 'adam', 'sgd' or 'rmsprop' for those features")
 
         self.early_stopping = int(early_stopping)
 
@@ -61,6 +68,14 @@ class FNNModel(BaseEstimator):
         self.validation_data = validation_data
         self.model = Sequential()
         self.label_binarizer = None
+        if l1_penalty > 0 or l2_penalty > 0:
+            self.kernel_regularizer = l1_l2(l1=l1_penalty, l2=l2_penalty)
+        else:
+            self.kernel_regularizer = None
+        self.l1_penalty = l1_penalty
+        self.l2_penalty = l2_penalty
+        self.gradient_clipping_norm = gradient_clipping_norm
+        self.gradient_clipping_value = gradient_clipping_value
 
     def summary(self):
         return self.model.summary()
@@ -70,14 +85,17 @@ class FNNClassifier(FNNModel):
     def __init__(self, hidden_layers=(50,), dropout=0.5, activation='softmax', optimizer='adam', metrics=('accuracy',),
                  loss='categorical_crossentropy', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
                  class_weight=None, validation_split=0.1, validation_data=None, early_stopping=5,
-                 learning_rate='auto'):
+                 learning_rate='auto', l1_penalty=0., l2_penalty=0.,
+                 gradient_clipping_norm=None, gradient_clipping_value=None):
         super().__init__(hidden_layers=hidden_layers, dropout=dropout, activation=activation, optimizer=optimizer,
                          metrics=metrics,
                          loss=loss, epochs=epochs, batch_size=batch_size, timeit=timeit, verbosity=verbosity,
                          callbacks=callbacks,
                          class_weight=class_weight, validation_split=validation_split, validation_data=validation_data,
                          early_stopping=early_stopping,
-                         learning_rate=learning_rate)
+                         learning_rate=learning_rate,
+                         l1_penalty=l1_penalty, l2_penalty=l2_penalty,
+                         gradient_clipping_norm=gradient_clipping_norm, gradient_clipping_value=gradient_clipping_value)
 
     def fit(self, X, y):
         if self.timeit:
@@ -117,7 +135,8 @@ class FNNClassifier(FNNModel):
             self.model.add(Dense(units=h, activation='relu', name=f'Hidden_{i+1}'))
             if d > 0:
                 self.model.add(Dropout(d, name=f'Dropout_{i+1}_{d}'))
-        self.model.add(Dense(units=n_classes, activation=self.activation, name=f'Output_{self.activation}'))
+        self.model.add(Dense(units=n_classes, activation=self.activation, name=f'Output_{self.activation}',
+                             kernel_regularizer=self.kernel_regularizer))
         self.model.compile(loss=self.loss, optimizer=self.optimizer, metrics=self.metrics)
         if self.verbosity == 2:
             self.model.summary()
@@ -148,12 +167,15 @@ class FNNRegressor(FNNModel):
     def __init__(self, hidden_layers=(50,), dropout=0.5, activation='linear', optimizer='adam', metrics=('mse',),
                  loss='mse', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
                  class_weight=None, validation_split=0.1, validation_data=None, early_stopping=5,
-                 learning_rate='auto'):
+                 learning_rate='auto', l1_penalty=0., l2_penalty=0.,
+                 gradient_clipping_norm=None, gradient_clipping_value=None):
         super().__init__(hidden_layers=hidden_layers, dropout=dropout, activation=activation, optimizer=optimizer,
                          metrics=metrics, loss=loss, epochs=epochs, batch_size=batch_size, timeit=timeit,
                          verbosity=verbosity, callbacks=callbacks, class_weight=class_weight,
                          validation_split=validation_split, validation_data=validation_data,
-                         early_stopping=early_stopping, learning_rate=learning_rate)
+                         early_stopping=early_stopping, learning_rate=learning_rate,
+                         l1_penalty=l1_penalty, l2_penalty=l2_penalty,
+                         gradient_clipping_norm=gradient_clipping_norm, gradient_clipping_value=gradient_clipping_value)
 
     def fit(self, X, y):
         if self.timeit:
@@ -170,7 +192,8 @@ class FNNRegressor(FNNModel):
             self.model.add(Dense(units=h, activation='relu', kernel_initializer='normal', name=f'Hidden_{i+1}'))
             if d > 0:
                 self.model.add(Dropout(d, name=f'Dropout_{i+1}_{d}'))
-        self.model.add(Dense(units=1, activation=self.activation, kernel_initializer='normal', name=f'Output_{self.activation}'))
+        self.model.add(Dense(units=1, activation=self.activation, kernel_initializer='normal',
+                             name=f'Output_{self.activation}', kernel_regularizer=self.kernel_regularizer))
         self.model.compile(loss=self.loss, optimizer=self.optimizer, metrics=self.metrics)
         if self.verbosity == 2:
             self.model.summary()
@@ -185,4 +208,3 @@ class FNNRegressor(FNNModel):
 
     def score(self, X, y):
         return self.model.evaluate(x=X, y=y)
-
