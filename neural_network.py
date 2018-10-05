@@ -170,12 +170,12 @@ class FNNClassifier(FNNModel):
 class FNNRegressor(FNNModel):
     def __init__(self, hidden_layers=(50,), dropout=0.5, activation='linear', optimizer='adam', metrics=('mse',),
                  loss='mse', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
-                 class_weight=None, validation_split=0.1, validation_data=None, early_stopping=5,
+                 validation_split=0.1, validation_data=None, early_stopping=5,
                  learning_rate='auto', l1_penalty=0., l2_penalty=0.,
                  gradient_clipping_norm=None, gradient_clipping_value=None):
         super().__init__(hidden_layers=hidden_layers, dropout=dropout, activation=activation, optimizer=optimizer,
                          metrics=metrics, loss=loss, epochs=epochs, batch_size=batch_size, timeit=timeit,
-                         verbosity=verbosity, callbacks=callbacks, class_weight=class_weight,
+                         verbosity=verbosity, callbacks=callbacks, class_weight=None,
                          validation_split=validation_split, validation_data=validation_data,
                          early_stopping=early_stopping, learning_rate=learning_rate,
                          l1_penalty=l1_penalty, l2_penalty=l2_penalty,
