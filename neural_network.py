@@ -31,6 +31,7 @@ class FNNModel(BaseEstimator):
         self.activation = activation
 
         self.learning_rate = learning_rate
+
         if learning_rate == 'auto' and gradient_clipping_norm is None and gradient_clipping_value is None:
             self.optimizer = optimizer
         else:
@@ -68,10 +69,12 @@ class FNNModel(BaseEstimator):
         self.validation_data = validation_data
         self.model = Sequential()
         self.label_binarizer = None
+
         if l1_penalty > 0 or l2_penalty > 0:
             self.kernel_regularizer = l1_l2(l1=l1_penalty, l2=l2_penalty)
         else:
             self.kernel_regularizer = None
+
         self.l1_penalty = l1_penalty
         self.l2_penalty = l2_penalty
         self.gradient_clipping_norm = gradient_clipping_norm
@@ -146,8 +149,9 @@ class FNNClassifier(FNNModel):
         if self.timeit:
             print('Fit complete in {:.2f} seconds'.format(time() - start_time))
 
+    # TODO: Modify for signoid activation
     def predict(self, X):
-        return np.array(self.model.predict(X, batch_size=self.batch_size) > 0.5, dtype=np.uint8)
+        return np.argmax(self.predict_proba(X), axis=1)
 
     def predict_proba(self, X):
         if self.activation == 'sigmoid':
