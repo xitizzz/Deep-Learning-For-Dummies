@@ -8,6 +8,7 @@ from sklearn.base import BaseEstimator
 from sklearn.preprocessing import LabelBinarizer
 import tensorflow.keras.backend as K
 from time import time
+import warnings
 
 
 def root_mean_squared_error(y_true, y_pred):
@@ -53,9 +54,6 @@ class FNNModel(BaseEstimator):
 
         self.early_stopping = int(early_stopping)
 
-        if self.early_stopping > 0:
-            callbacks += (EarlyStopping(patience=(self.early_stopping - 1)),)
-
         self.optimizer = optimizer
         self.metrics = list(metrics)
         self.loss = loss
@@ -63,12 +61,20 @@ class FNNModel(BaseEstimator):
         self.batch_size = batch_size
         self.timeit = timeit
         self.verbosity = verbosity
-        self.callbacks = list(callbacks)
+
         self.class_weight = class_weight
         self.validation_split = validation_split
         self.validation_data = validation_data
         self.model = Sequential()
         self.label_binarizer = None
+
+        if self.early_stopping > 0:
+            if self.validation_split == 0 and self.validation_data == None:
+                warnings.warn("Using early stopping without validation set.")
+                callbacks += (EarlyStopping(monitor='loss', patience=(self.early_stopping - 1)),)
+            else:
+                callbacks += (EarlyStopping(patience=(self.early_stopping - 1)),)
+        self.callbacks = list(callbacks)
 
         if l1_penalty > 0 or l2_penalty > 0:
             self.kernel_regularizer = l1_l2(l1=l1_penalty, l2=l2_penalty)
@@ -85,8 +91,8 @@ class FNNModel(BaseEstimator):
 
 
 class FNNClassifier(FNNModel):
-    def __init__(self, hidden_layers=(50,), dropout=0.5, activation='softmax', optimizer='adam', metrics=('accuracy',),
-                 loss='categorical_crossentropy', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
+    def __init__(self, hidden_layers=(50,), dropout=0.5, activation='auto', optimizer='adam', metrics=('accuracy',),
+                 loss='crossentropy', epochs=100, batch_size=128, timeit=True, verbosity=2, callbacks=(),
                  class_weight=None, validation_split=0.1, validation_data=None, early_stopping=5,
                  learning_rate='auto', l1_penalty=0., l2_penalty=0.,
                  gradient_clipping_norm=None, gradient_clipping_value=None):
@@ -109,28 +115,37 @@ class FNNClassifier(FNNModel):
             print(
                 'Data size ({:d}, {:d}) -\t Epochs {:d} -\t Batch Size {:d}'.format(X.shape[0], X.shape[1], self.epochs,
                                                                                     self.batch_size))
+
+
         if len(y.shape) == 1 and len(np.unique(y)) > 2:
             self.label_binarizer = LabelBinarizer()
             y = self.label_binarizer.fit_transform(y)
 
-        # TODO: Add error cases like multiple labels
         if len(y.shape) == 2:
+            if len(np.unique(y)) > 2:
+                raise ValueError("Invalid Labels. Labels must be 'one hot' or 'sequence of integer labels' or 'multilabel'")
+
             n_classes = y.shape[1]
-            print(n_classes)
+            if self.loss == 'crossentropy':
+                self.loss = 'categorical_crossentropy'
+            if self.activation == 'auto':
+                self.activation = 'softmax'
             if self.class_weight == 'balanced':
                 weights = list(y.shape[0] / (n_classes * y.sum(axis=0)))
                 self.class_weight = {i: weights[i] for i in range(len(weights))}
                 print('Computed Class Weights', self.class_weight)
         elif len(y.shape) == 1:
             n_classes = 1
-            self.loss = 'binary_crossentropy'
-            self.activation = 'sigmoid'
+            if self.loss == 'crossentropy':
+                self.loss = 'binary_crossentropy'
+            if self.activation == 'auto':
+                self.activation = 'sigmoid'
             if self.class_weight == 'balanced':
                 weights = list(y.shape[0] / (2 * np.bincount(y)))
                 self.class_weight = {0: weights[0], 1: weights[1]}
                 print('Computed Class Weights', self.class_weight)
         else:
-            raise ValueError("Invalid Label")
+            raise ValueError("Invalid Label. Invalid dimenionality. 'y' can only be 1 or 2 dimensional.")
 
         K.clear_session()
         self.model.add(InputLayer(input_shape=(n_features,), name='Input'))
@@ -149,12 +164,11 @@ class FNNClassifier(FNNModel):
         if self.timeit:
             print('Fit complete in {:.2f} seconds'.format(time() - start_time))
 
-    # TODO: Modify for signoid activation
     def predict(self, X):
         return np.argmax(self.predict_proba(X), axis=1)
 
     def predict_proba(self, X):
-        if self.activation == 'sigmoid':
+        if self.activation == 'sigmoid' and self.n_classes==1:
             return np.hstack([1 - self.model.predict(X, batch_size=self.batch_size),
                               self.model.predict(X, batch_size=self.batch_size)])
         else:
